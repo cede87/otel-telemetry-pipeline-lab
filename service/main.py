@@ -8,6 +8,7 @@ import time
 from typing import Dict
 
 from fastapi import FastAPI, HTTPException, Request
+from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 
 from .telemetry import get_meter, get_tracer, init_telemetry
 
@@ -38,6 +39,9 @@ request_latency = meter.create_histogram(
 )
 
 app = FastAPI(title="Telemetry Lab Service", version="0.1")
+
+# Instrument FastAPI for automatic tracing
+FastAPIInstrumentor().instrument_app(app)
 
 
 def _attrs(request: Request) -> Dict[str, str]:

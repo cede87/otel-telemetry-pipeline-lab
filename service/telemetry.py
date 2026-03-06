@@ -13,6 +13,8 @@ from typing import Optional
 from opentelemetry import metrics, trace
 from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExporter
 from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+from opentelemetry.instrumentation.logging import LoggingInstrumentor
 from opentelemetry.sdk.metrics import MeterProvider
 from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
 from opentelemetry.sdk.resources import Resource
@@ -51,15 +53,31 @@ def init_metrics(resource: Resource) -> None:
 
 
 def init_logging() -> None:
-    """Configure structured logging.
+    """Configure structured logging with trace correlation.
 
-    For now, we keep it simple with standard logging; the log format is structured
-    enough for downstream parsing and experimentation.
+    Injects trace_id and span_id into log records for correlation with traces.
     """
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s %(message)s",
+    # Custom formatter to include trace context
+    class TraceFormatter(logging.Formatter):
+        def format(self, record):
+            # Get trace and span IDs from the record (injected by LoggingInstrumentor)
+            trace_id = getattr(record, 'otelTraceID', '')
+            span_id = getattr(record, 'otelSpanID', '')
+            record.trace_id = trace_id
+            record.span_id = span_id
+            return super().format(record)
+
+    # Configure logging with the custom formatter
+    formatter = TraceFormatter(
+        "%(asctime)s %(levelname)s %(name)s trace_id=%(trace_id)s span_id=%(span_id)s %(message)s"
     )
+    handler = logging.StreamHandler()
+    handler.setFormatter(formatter)
+    logging.getLogger().addHandler(handler)
+    logging.getLogger().setLevel(logging.INFO)
+
+    # Instrument logging to propagate context
+    LoggingInstrumentor().instrument()
 
 
 def init_telemetry() -> None:
