@@ -5,10 +5,12 @@ from __future__ import annotations
 import logging
 import random
 import time
-from typing import Dict
+from typing import Any, Dict
 
+import httpx
 from fastapi import FastAPI, HTTPException, Request
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
 
 from .telemetry import get_meter, get_tracer, init_telemetry
 
@@ -42,6 +44,8 @@ app = FastAPI(title="Telemetry Lab Service", version="0.1")
 
 # Instrument FastAPI for automatic tracing
 FastAPIInstrumentor().instrument_app(app)
+# Instrument HTTPX so it propagates the W3C traceparent header on outbound calls.
+HTTPXClientInstrumentor().instrument()
 
 
 def _attrs(request: Request) -> Dict[str, str]:
@@ -116,3 +120,31 @@ def error(request: Request) -> Dict[str, str]:
     request_latency.record(latency_ms, attrs)
     logger.info("error endpoint succeeded", extra={"route": "/error"})
     return {"status": "ok", "endpoint": "/error"}
+
+
+@app.post("/checkout")
+def checkout(request: Request, payload: Dict[str, Any] | None = None) -> Dict[str, Any]:
+    start = time.perf_counter()
+    attrs = _attrs(request)
+
+    with tracer.start_as_current_span("checkout-handler"):
+        logger.info("calling payment service", extra={"route": "/checkout"})
+        # HTTPX instrumentation injects the traceparent header here to propagate context.
+        try:
+            with httpx.Client(timeout=2.0) as client:
+                response = client.post(
+                    "http://payment-service:8000/charge", json=payload or {}
+                )
+                response.raise_for_status()
+        except httpx.HTTPError as exc:
+            error_counter.add(1, attrs)
+            latency_ms = (time.perf_counter() - start) * 1000
+            request_latency.record(latency_ms, attrs)
+            logger.error("payment service call failed", extra={"error": str(exc)})
+            raise HTTPException(status_code=502, detail="payment service error") from exc
+
+    request_counter.add(1, attrs)
+    latency_ms = (time.perf_counter() - start) * 1000
+    request_latency.record(latency_ms, attrs)
+    logger.info("checkout completed", extra={"route": "/checkout"})
+    return {"status": "ok", "payment": response.json()}

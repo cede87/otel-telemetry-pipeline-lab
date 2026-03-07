@@ -8,3 +8,5 @@ opentelemetry-distro==0.47b0
 opentelemetry-instrumentation==0.47b0
 opentelemetry-instrumentation-logging==0.47b0
 opentelemetry-instrumentation-fastapi==0.47b0
+opentelemetry-instrumentation-httpx==0.47b0
+httpx==0.27.2

@@ -13,7 +13,6 @@ from typing import Optional
 from opentelemetry import metrics, trace
 from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExporter
 from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
-from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.instrumentation.logging import LoggingInstrumentor
 from opentelemetry.sdk.metrics import MeterProvider
 from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
@@ -21,7 +20,7 @@ from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
-SERVICE_NAME = os.getenv("OTEL_SERVICE_NAME", "telemetry-lab-service")
+SERVICE_NAME = os.getenv("OTEL_SERVICE_NAME", "payment-service")
 SERVICE_VERSION = "0.1"
 OTLP_ENDPOINT = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://otel-collector:4317")
 
@@ -61,8 +60,8 @@ def init_logging() -> None:
     class TraceFormatter(logging.Formatter):
         def format(self, record):
             # Get trace and span IDs from the record (injected by LoggingInstrumentor)
-            trace_id = getattr(record, 'otelTraceID', '')
-            span_id = getattr(record, 'otelSpanID', '')
+            trace_id = getattr(record, "otelTraceID", "")
+            span_id = getattr(record, "otelSpanID", "")
             record.trace_id = trace_id
             record.span_id = span_id
             if trace_id and span_id:

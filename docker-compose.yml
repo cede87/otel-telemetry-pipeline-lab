@@ -15,12 +15,35 @@ services:
     build: .
     environment:
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_SERVICE_NAME: checkout-service
     depends_on:
       - otel-collector
+      - payment-service
     networks:
       - telemetry-net
     ports:
       - "8000:8000"
+
+  payment-service:
+    build:
+      context: .
+      dockerfile: payment_service/Dockerfile
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_SERVICE_NAME: payment-service
+    depends_on:
+      - otel-collector
+    networks:
+      - telemetry-net
+
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "16686:16686"
+    networks:
+      - telemetry-net
 
 networks:
   telemetry-net:
