@@ -1,23 +1,101 @@
-version: "3.9"
-
 services:
-  otel-collector:
-    image: otel/opentelemetry-collector:0.98.0
-    command: ["--config=/etc/otelcol/config.yml"]
+  kafka:
+    image: apache/kafka:3.9.0
+    environment:
+      CLUSTER_ID: q1Sh-9_ISia_zwGINzE6Pw
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+    healthcheck:
+      test: ["CMD", "bash", "-c", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
     volumes:
-      - ./otel-collector-config.yml:/etc/otelcol/config.yml:ro
+      - kafka_data:/var/lib/kafka/data
     networks:
       - telemetry-net
+
+  kafka-init:
+    image: apache/kafka:3.9.0
+    depends_on:
+      kafka:
+        condition: service_healthy
+    command:
+      - /opt/kafka/bin/kafka-topics.sh
+      - --bootstrap-server
+      - kafka:9092
+      - --create
+      - --if-not-exists
+      - --topic
+      - otel-traces
+      - --partitions
+      - "1"
+      - --replication-factor
+      - "1"
+    restart: "no"
+    networks:
+      - telemetry-net
+
+  otel-agent:
+    image: otel/opentelemetry-collector-contrib:0.98.0
+    command: ["--config=/etc/otelcol/agent-config.yaml"]
+    volumes:
+      - ./agent-config.yaml:/etc/otelcol/agent-config.yaml:ro
+    depends_on:
+      - otel-gateway
     ports:
       - "4317:4317"
+      - "4318:4318"
+    networks:
+      - telemetry-net
+
+  otel-gateway:
+    image: otel/opentelemetry-collector-contrib:0.98.0
+    command: ["--config=/etc/otelcol/gateway-config.yaml"]
+    volumes:
+      - ./gateway-config.yaml:/etc/otelcol/gateway-config.yaml:ro
+    depends_on:
+      kafka:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+    networks:
+      - telemetry-net
+
+  otel-processor:
+    image: otel/opentelemetry-collector-contrib:0.98.0
+    command: ["--config=/etc/otelcol/processor-config.yaml"]
+    volumes:
+      - ./processor-config.yaml:/etc/otelcol/processor-config.yaml:ro
+    depends_on:
+      kafka:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+      jaeger:
+        condition: service_started
+    networks:
+      - telemetry-net
 
   telemetry-service:
     build: .
     environment:
-      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-agent:4317
       OTEL_SERVICE_NAME: checkout-service
     depends_on:
-      - otel-collector
+      - otel-agent
       - payment-service
     networks:
       - telemetry-net
@@ -29,10 +107,10 @@ services:
       context: .
       dockerfile: payment_service/Dockerfile
     environment:
-      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-agent:4317
       OTEL_SERVICE_NAME: payment-service
     depends_on:
-      - otel-collector
+      - otel-agent
     networks:
       - telemetry-net
 
@@ -48,3 +126,6 @@ services:
 networks:
   telemetry-net:
     driver: bridge
+
+volumes:
+  kafka_data:

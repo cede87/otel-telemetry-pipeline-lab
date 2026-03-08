@@ -1,143 +1,56 @@
 # OpenTelemetry Telemetry Pipeline Lab
 
-This repository contains a small experimental environment to explore modern observability pipelines using OpenTelemetry.
+This lab demonstrates a multi-stage OpenTelemetry pipeline for FastAPI services, with Kafka used as a buffering layer between collector tiers.
 
-The purpose of this project is to understand how telemetry signals (metrics, traces and logs) flow through a typical observability pipeline and how different components interact in a real-world setup.
+## Architecture
 
-Rather than focusing on a specific production system, this repository acts as a learning and experimentation lab to investigate concepts such as telemetry ingestion, processing, sampling and visualization.
+Telemetry flow:
 
----
+```mermaid
+flowchart LR
+  TS[telemetry-service] -->|OTLP| AG[OTEL Agent Collector]
+  PS[payment-service] -->|OTLP| AG
+  AG -->|OTLP + batch| GW[OTEL Gateway Collector]
+  GW -->|traces topic: otel-traces| K[(Kafka)]
+  K --> PR[OTEL Processing Collector]
+  PR -->|OTLP| J[Jaeger]
+```
 
-## Project Goals
+Collector roles:
 
-The main objective of this project is to gain a deeper understanding of telemetry pipelines by building a minimal but realistic observability stack.
+- `otel-agent`: edge receiver for service telemetry; applies `memory_limiter` + `batch`; forwards via OTLP.
+- `otel-gateway`: central ingress from agent; applies `memory_limiter` + `batch`; exports traces to Kafka topic `otel-traces`.
+- `otel-processor`: consumes traces from Kafka; applies `memory_limiter` + `batch`; exports to Jaeger.
 
-The project explores:
+## Components
 
-- Instrumenting services with OpenTelemetry
-- Collecting telemetry using the OpenTelemetry Collector
-- Processing telemetry through pipeline processors
-- Exporting telemetry signals to different backends
-- Visualizing system behaviour through observability dashboards
+- `telemetry-service` and `payment-service`: FastAPI services with OpenTelemetry instrumentation.
+- `kafka`: single-node KRaft Kafka broker.
+- `kafka-init`: one-shot topic bootstrapper (`otel-traces`).
+- `otel-agent`, `otel-gateway`, `otel-processor`: role-separated OpenTelemetry Collectors.
+- `jaeger`: trace backend and UI.
 
-The goal is not to build a production-ready system, but to explore the architecture and trade-offs involved in observability platforms.
+## Collector Config Files
 
----
+- `agent-config.yaml`
+- `gateway-config.yaml`
+- `processor-config.yaml`
 
-## Architecture Overview
+## Run
 
-The project simulates a simplified telemetry pipeline.
+```bash
+docker compose up --build
+```
 
-client traffic
-↓
-instrumented service (Python)
-↓
-OpenTelemetry SDK
-↓
-OpenTelemetry Collector
-↓
-telemetry processing pipeline
-↓
-metrics / logs / traces backends
+Access:
 
-The pipeline will allow experimentation with:
+- App endpoint: `http://localhost:8000`
+- Jaeger UI: `http://localhost:16686`
 
-- telemetry batching
-- sampling strategies
-- attribute processing
-- cardinality implications
-- telemetry routing
+## Notes
 
----
-
-## Repository Components
-
-### Service
-
-A small Python service instrumented with OpenTelemetry.  
-It generates telemetry signals including:
-
-- traces
-- metrics
-- structured logs
-
-The service exposes simple HTTP endpoints to simulate application workloads.
-
----
-
-### Load Generator
-
-A lightweight traffic generator used to produce requests against the service.
-
-This component allows simulation of different runtime scenarios such as:
-
-- latency spikes
-- request bursts
-- error responses
-
-These scenarios make the telemetry pipeline more interesting to observe.
-
----
-
-### OpenTelemetry Collector
-
-The collector acts as the central telemetry pipeline component.
-
-Its responsibilities include:
-
-- receiving telemetry signals
-- batching and processing telemetry
-- exporting signals to different backends
-
-The project experiments with different processors and pipeline configurations.
-
----
-
-### Observability Backends
-
-Telemetry data is exported to observability backends for analysis and visualization.
-
-Typical backends include:
-
-- metrics storage
-- log aggregation
-- trace visualization
-
-These allow inspection of system behaviour and correlation between signals.
-
----
-
-## Topics Explored
-
-This lab focuses on understanding several important observability concepts:
-
-- telemetry signal types (metrics, logs, traces)
-- telemetry ingestion pipelines
-- batching and processing strategies
-- trace sampling techniques
-- high-cardinality telemetry attributes
-- telemetry routing and enrichment
-
----
-
-## Running the Environment
-
-The full environment will run locally using containers.
-
-The goal is to provide a reproducible setup that can be launched easily.
-
-This will start the full telemetry environment including the instrumented service, telemetry pipeline and observability backends.
-
----
-
-## Why This Project
-
-Modern distributed systems generate enormous amounts of telemetry data. Understanding how telemetry pipelines work is critical for designing scalable observability platforms.
-
-This project provides a hands-on environment to explore these systems and understand the architectural trade-offs behind telemetry ingestion and processing.
-
----
-
-## Status
-
-This project is an evolving lab environment and will continue to grow as new observability experiments are added.
+- Services export OTLP to `otel-agent:4317`.
+- Kafka topics are auto-created in two ways:
+  - broker setting `KAFKA_AUTO_CREATE_TOPICS_ENABLE=true`
+  - explicit startup job `kafka-init` creates `otel-traces`
+- FastAPI service application logic is unchanged; only telemetry infrastructure was extended.
